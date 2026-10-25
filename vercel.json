@@ -1,5 +1,14 @@
 {
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/server.js" }
+  "version": 2,
+  "builds": [
+    { "src": "server.js", "use": "@vercel/node" },
+    { "src": "style.css", "use": "@vercel/static" },
+    { "src": "logo.png", "use": "@vercel/static" },
+    { "src": "index.html", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/style.css", "dest": "/style.css" },
+    { "src": "/logo.png", "dest": "/logo.png" },
+    { "src": "/(.*)", "dest": "/server.js" }
   ]
 }
