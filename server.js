@@ -137,3 +137,4 @@ app.delete('/api/clear', (req,res)=>{
 });
 
 app.get('/', (req,res)=> res.sendFile(path.join(__dirname,'index.html')));
+export default app;
