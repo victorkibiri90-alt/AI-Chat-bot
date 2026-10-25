@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<body style="background:#111; color:white; font-family:sans-serif; padding:20px;">
+<h2>Voice Test - Pentagon</h2>
+<button id="mic-btn" style="background:#1a1a1a; border:2px solid gold; width:60px; height:60px; border-radius:50%; cursor:pointer; font-size:24px;">|||</button>
+<input id="user-input" style="width:80%; padding:10px; margin-top:20px;" placeholder="speak...">
+<button id="send-btn" style="padding:10px;">Send</button>
+<div id="chat"></div>
+
+<script>
+const micBtn = document.getElementById('mic-btn');
+const inputBox = document.getElementById('user-input');
+let recognition;
+if ('webkitSpeechRecognition' in window) {
+  recognition = new webkitSpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.onstart = () => { micBtn.style.background='gold'; console.log("start"); };
+  recognition.onend = () => { micBtn.style.background='#1a1a1a'; console.log("end"); };
+  recognition.onresult = (e) => { inputBox.value = e.results[0][0].transcript; console.log(e.results[0][0].transcript); };
+  recognition.onerror = (e) => { alert("Error: "+e.error); };
+  micBtn.onclick = () => recognition.start();
+} else {
+  alert("Use Chrome");
+}
+function addMessage(t,s){ document.getElementById('chat').innerHTML += "<p><b>"+s+":</b> "+t+"</p>"; const u=new SpeechSynthesisUtterance(t); speechSynthesis.speak(u); }
+document.getElementById('send-btn').onclick = () => { addMessage(inputBox.value, 'You'); setTimeout(()=>addMessage('Pentagon Bot heard: '+inputBox.value, 'ai'),500); }
+</script>
+</body>
+</html>

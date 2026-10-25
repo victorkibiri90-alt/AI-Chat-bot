@@ -1,0 +1,6 @@
+.env
+node_modules
+pentagon.db
+.env
+__pycache__/
+venv/
