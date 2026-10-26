@@ -67,63 +67,248 @@ app.get('/api/history', (req,res)=>{
   }catch{res.json([]);}
 });
 
-app.post('/api/chat', optionalAuth, async (req,res)=>{
-  try{
-    const userMessage = req.body.message || "";
+app.post('/api/chat', optionalAuth, async (req, res) => {
+  try {
+    const userMessage = String(req.body.message || "");
     const fileData = req.body.image;
     const mimeType = req.body.mimeType;
-    
-    console.log("User:", userMessage, fileData ? `+ file ${mimeType}` : "");
 
-    if(req.userId) db.run(`INSERT INTO chats (userId,role,message) VALUES (?,?,?)`,[req.userId,'user',userMessage]);
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({
+        reply: "PENTAGON AI is not configured yet."
+      });
+    }
+
+    const systemPrompt = `
+You are PENTAGON AI, an intelligent general-purpose AI assistant.
+
+IDENTITY:
+- Your name is PENTAGON AI.
+- Introduce yourself as PENTAGON AI.
+- Do not present yourself as Groq, ChatGPT, or Gemini.
+- If asked about your underlying AI model or provider,
+  answer truthfully.
+- Do not invent details about your creators.
+
+PERSONALITY:
+- Be adaptive, intelligent, warm, and approachable.
+- Adjust your tone to the user's situation.
+- Use emojis naturally when appropriate, not excessively.
+- Be professional for serious or technical questions.
+- Be empathetic and respectful in emotional conversations.
+- Be concise for simple questions and detailed when needed.
+- Ask clarifying questions only when necessary.
+
+INTELLIGENCE:
+- Prioritize accuracy and clear reasoning.
+- Never fabricate facts, sources, or capabilities.
+- Admit uncertainty when appropriate.
+- Explain complex topics clearly.
+- Help with education, coding, writing, analysis,
+  brainstorming, and everyday questions.
+- Do not claim to have searched the internet unless
+  an actual search tool was used.
+`;
+
+    let model = "openai/gpt-oss-120b";
+    let content = userMessage;
+
+    if (fileData && mimeType) {
+      if (typeof fileData !== "string") {
+        return res.status(400).json({
+          reply: "Invalid attachment."
+        });
+      }
+
+      const base64 = fileData.includes(",")
+        ? fileData.split(",")[1]
+        : fileData;
+
+      const buffer = Buffer.from(base64, "base64");
+
+      if (buffer.length > 10 * 1024 * 1024) {
+        return res.status(413).json({
+          reply: "File too large. Please upload a file under 10 MB."
+        });
+      }
+
+      if (mimeType === "image/jpeg" ||
+          mimeType === "image/png") {
+
+        model = "qwen/qwen3.8-27b";
+
+        content = [
+          {
+            type: "text",
+            text: userMessage ||
+              "Please analyze this image."
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${mimeType};base64,${base64}`
+            }
+          }
+        ];
+
+      } else if (mimeType === "application/pdf") {
+
+        const { PDFParse } = await import("pdf-parse");
+        const parser = new PDFParse({
+          data: new Uint8Array(buffer)
+        });
+
+        let extractedText;
+
+        try {
+          const result = await parser.getText();
+          extractedText = result.text;
+        } finally {
+          await parser.destroy();
+        }
+
+        if (!extractedText?.trim()) {
+          return res.json({
+            reply: "I couldn't extract readable text from this PDF. It may be scanned or image-based."
+          });
+        }
+
+        content = `
+User question:
+${userMessage || "Analyze this document."}
+
+PDF document content:
+${extractedText.slice(0, 30000)}
+`;
+
+      } else if (
+        mimeType ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ) {
+
+        const mammoth = await import("mammoth");
+
+        const result = await mammoth.extractRawText({
+          buffer
+        });
+
+        if (!result.value?.trim()) {
+          return res.json({
+            reply: "I couldn't extract readable text from this Word document."
+          });
+        }
+
+        content = `
+User question:
+${userMessage || "Analyze this document."}
+
+Word document content:
+${result.value.slice(0, 30000)}
+`;
+
+      } else {
+        return res.status(400).json({
+          reply: "Unsupported file type. Please upload JPG, PNG, PDF, or DOCX."
+        });
+      }
+    }
+
+    if (!fileData && !userMessage.trim()) {
+      return res.status(400).json({
+        reply: "Please enter a message."
+      });
+    }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      25000
+    );
 
-    // === ONLY ADDITION: BUILD PARTS FOR IMAGE/DOCUMENT ===
-    let parts = [];
-    if(fileData && mimeType){
-      // FIXED: Remove data: prefix so Google accepts it
-      const cleanBase64 = fileData.includes(',') ? fileData.split(',')[1] : fileData;
-      parts.push({
-        inline_data: {
-          mime_type: mimeType,
-          data: cleanBase64
-        }
-      });
-      parts.push({ text: userMessage || `Analyze this ${mimeType.startsWith('image/') ? 'image' : 'document'}. Give detailed details.` });
-    } else {
-      parts.push({ text: userMessage });
-    }
+    let response;
 
-    let r;
     try {
-      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: parts }] }),
-        signal: controller.signal
+      response = await fetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization:
+              `Bearer ${process.env.GROQ_API_KEY}`
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt
+              },
+              {
+                role: "user",
+                content
+              }
+            ],
+            max_completion_tokens: 2048
+          }),
+          signal: controller.signal
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const data = await response.json();
+
+    console.log("Groq status:", response.status);
+
+    if (!response.ok) {
+      console.error(
+        "Groq API error:",
+        response.status,
+        data.error?.message
+      );
+
+      const message =
+        response.status === 429
+          ? "I'm receiving too many requests right now. Please try again shortly."
+          : response.status === 401
+          ? "PENTAGON AI has an API authentication problem."
+          : data.error?.message ||
+            "The AI service is temporarily unavailable.";
+
+      return res.status(response.status).json({
+        reply: message
       });
-      clearTimeout(timeoutId);
-    } catch (netError) {
-      clearTimeout(timeoutId);
-      console.error("Connection failed due to slow network or timeout:", netError);
-      return res.json({ reply: "Network error: Connection timed out. Please check your Wi-Fi and try again." });
     }
 
-    const data = await r.json();
-    console.log("Google status:", r.status);
-    
-    if(data.error){
-      return res.json({reply: data.error.message});
+    const botReply =
+      data.choices?.[0]?.message?.content ||
+      "I couldn't generate a response. Please try again.";
+
+    if (req.userId) {
+      db.run(
+        `INSERT INTO chats (userId,role,message) VALUES (?,?,?)`,
+        [req.userId, "user", userMessage]
+      );
+
+      db.run(
+        `INSERT INTO chats (userId,role,message) VALUES (?,?,?)`,
+        [req.userId, "bot", botReply]
+      );
     }
 
-    const botReply = data.candidates?.[0]?.content?.parts?.[0]?.text || "Hi, I am PENTAGON BOT";
-    if(req.userId) db.run(`INSERT INTO chats (userId,role,message) VALUES (?,?,?)`,[req.userId,'bot',botReply]);
-    res.json({reply: botReply});
-  }catch(e){
-    console.log("Server Error:", e);
-    res.json({reply: "Error: " + e.message});
+    return res.json({ reply: botReply });
+
+  } catch (error) {
+    console.error("PENTAGON AI error:", error);
+
+    return res.status(500).json({
+      reply:
+        error.name === "AbortError"
+          ? "The AI request took too long. Please try again."
+          : "Something went wrong while processing your request."
+    });
   }
 });
 
