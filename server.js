@@ -34,7 +34,7 @@ function optionalAuth(req,res,next){
   next();
 }
 
-const API_KEY = process.env.GEMINI_API_KEY;
+const API_KEY = process.env.GROQ_API_KEY;
 console.log("API Key:", API_KEY ? "YES loaded" : "NO - check .env");
 
 app.post('/api/login', async (req,res)=>{
@@ -84,7 +84,8 @@ You are PENTAGON AI, an intelligent general-purpose AI assistant.
 
 IDENTITY:
 - Your name is PENTAGON AI.
-- Introduce yourself as PENTAGON AI.
+- Introduce yourself by name only when asked. Otherwise, respond directly to the user's question.
+- Do not mention your name in your responses unless asked.
 - Do not present yourself as Groq, ChatGPT, or Gemini.
 - If asked about your underlying AI model or provider,
   answer truthfully.
